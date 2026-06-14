@@ -22,7 +22,7 @@ html,body{height:100%;font-family:'Segoe UI',Arial,sans-serif;background:var(--b
 #bg-zone:hover{border-color:var(--accent);}
 #bg-zone img{max-width:100%;max-height:58px;border-radius:4px;object-fit:contain;}
 
-#sheets-list{display:flex;flex-direction:column;gap:4px;padding:0 7px 6px;max-height:180px;overflow-y:auto;}
+#sheets-list{display:flex;flex-direction:column;gap:4px;padding:0 7px 6px;overflow-y:auto;}
 .sheet-item{background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:6px 10px;cursor:pointer;display:flex;align-items:center;gap:7px;font-size:12px;transition:border-color .15s;}
 .sheet-item:hover,.sheet-item.active{border-color:var(--accent);}
 .sheet-thumb{width:34px;height:26px;object-fit:contain;border-radius:3px;}
@@ -100,7 +100,7 @@ input[type=range]{width:100%;accent-color:var(--accent);}
     <span>🖼 素材シート</span>
     <button class="tb-btn" style="padding:2px 7px;font-size:11px;" onclick="pickSheet()">＋</button>
   </div>
-  <div id="sheets-list">
+  <div id="sheets-list" style="flex:1;overflow-y:auto;">
     <div id="gh-loading" style="text-align:center;color:var(--muted);font-size:11px;padding:10px 0;">
       <span class="loading-spin"></span>読み込み中...
     </div>
@@ -128,9 +128,6 @@ input[type=range]{width:100%;accent-color:var(--accent);}
     <button class="shape-btn" onclick="openTextModal()" style="flex:2;">テキスト追加</button>
     <button class="shape-btn" onclick="clearAll()" style="flex:1;color:var(--red);border-color:var(--red);">🗑 全消去</button>
   </div>
-
-  <div class="sec-title">✅ 使ったパーツ</div>
-  <div id="saved-parts"><div style="text-align:center;color:var(--muted);font-size:11px;padding:12px 0;">素材シートから<br>ドラッグで範囲を選んでください</div></div>
 </div>
 
 <!-- CENTER -->
@@ -168,9 +165,9 @@ input[type=range]{width:100%;accent-color:var(--accent);}
       <button class="tb-btn" style="width:100%;font-size:11px;" onclick="resetColor()">リセット</button>
     </div>
   </div>
-  <div class="r-sec">
-    <div class="r-title">📋 レイヤー</div>
-    <div id="layer-list"></div>
+  <div class="r-sec" style="flex:1;overflow-y:auto;">
+    <div class="r-title">✅ 使ったパーツ</div>
+    <div id="saved-parts"><div style="text-align:center;color:var(--muted);font-size:11px;padding:12px 0;">素材シートから<br>ドラッグで範囲を選んでください</div></div>
   </div>
 </div>
 </div>
@@ -250,11 +247,23 @@ async function loadGithubSheets(){
     if(!res.ok)throw new Error();
     const files=(await res.json()).filter(f=>/\.(png|jpg|jpeg|webp)$/i.test(f.name));
     document.getElementById('gh-loading').style.display='none';
-    for(const f of files){
-      try{const img=await loadImg(RAW_BASE+f.name+'?t='+Date.now());sheets.push({name:f.name.replace(/\.[^.]+$/,''),img,src:img.src,fromGithub:true});}catch(e){}
-    }
-    renderSheets();
-    if(files.length)toast(`GitHubから${files.length}枚読み込みました`,'ok');
+    if(!files.length){renderSheets();return;}
+
+    // 並列で全部同時に読み込む
+    let loaded=0;
+    const promises=files.map(f=>{
+      const src=RAW_BASE+encodeURIComponent(f.name)+'?t='+Date.now();
+      return loadImg(src)
+        .then(img=>{
+          sheets.push({name:f.name.replace(/\.[^.]+$/,''),img,src:img.src,fromGithub:true});
+          loaded++;
+          // 1枚読み込むたびに即表示
+          renderSheets();
+        })
+        .catch(()=>{});
+    });
+    await Promise.all(promises);
+    if(loaded>0)toast(`GitHubから${loaded}枚読み込みました`,'ok');
   }catch(e){
     document.getElementById('gh-loading').innerHTML='<div style="color:var(--red);font-size:11px;padding:8px 0;text-align:center;">読み込み失敗<br>「＋」で手動追加できます</div>';
   }
