@@ -4,7 +4,7 @@ TL.png
 チョン&裏打ち&ベース&鳥居.png
 PA.png
 肩頭.png
-押し.png
+押し戻り.png
 勝ち足&TF.png
 上昇下落.png
 チャートパターン.png
