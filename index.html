@@ -18,9 +18,7 @@ html,body{height:100%;font-family:'Segoe UI',Arial,sans-serif;background:var(--b
 .logo{padding:13px 14px;border-bottom:1px solid var(--border);font-size:14px;font-weight:700;}
 .sec-title{font-size:11px;font-weight:600;padding:7px 12px 4px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:flex;justify-content:space-between;align-items:center;}
 
-#bg-zone{margin:7px;border:2px dashed var(--border);border-radius:8px;min-height:68px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:border-color .15s;text-align:center;padding:8px;font-size:12px;color:var(--muted);}
-#bg-zone:hover{border-color:var(--accent);}
-#bg-zone img{max-width:100%;max-height:58px;border-radius:4px;object-fit:contain;}
+
 
 #sheets-list{display:flex;flex-direction:column;gap:4px;padding:0 7px 6px;overflow-y:auto;}
 .sheet-item{background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:6px 10px;cursor:pointer;display:flex;align-items:center;gap:7px;font-size:12px;transition:border-color .15s;}
@@ -91,10 +89,6 @@ input[type=range]{width:100%;accent-color:var(--accent);}
 <!-- LEFT -->
 <div id="left">
   <div class="logo">🎨 チャートエディター</div>
-
-  <div id="bg-zone" onclick="pickBg()">
-    <div><div style="font-size:20px;margin-bottom:3px;">📈</div>チャートをアップロード</div>
-  </div>
 
   <div class="sec-title">
     <span>🖼 素材シート</span>
@@ -245,9 +239,28 @@ async function loadGithubSheets(){
   try{
     const res=await fetch(API_BASE+'?ref='+GITHUB_BRANCH);
     if(!res.ok)throw new Error();
-    const files=(await res.json()).filter(f=>/\.(png|jpg|jpeg|webp)$/i.test(f.name));
+    const allFiles=await res.json();
+    let files=allFiles.filter(f=>/\.(png|jpg|jpeg|webp)$/i.test(f.name));
     document.getElementById('gh-loading').style.display='none';
     if(!files.length){renderSheets();return;}
+
+    // order.txtがあれば順番を適用
+    const orderFile=allFiles.find(f=>f.name==='order.txt');
+    if(orderFile){
+      try{
+        const orderRes=await fetch(RAW_BASE+'order.txt?t='+Date.now());
+        const orderText=await orderRes.text();
+        const order=orderText.split('\n').map(l=>l.trim()).filter(Boolean);
+        // order.txtの順番で並べる、載っていないファイルは最後に
+        const ordered=[],rest=[];
+        order.forEach(name=>{
+          const f=files.find(x=>x.name===name);
+          if(f)ordered.push(f);
+        });
+        files.forEach(f=>{if(!order.includes(f.name))rest.push(f);});
+        files=[...ordered,...rest];
+      }catch(e){}
+    }
 
     // 並列で全部同時に読み込む
     let loaded=0;
@@ -255,9 +268,10 @@ async function loadGithubSheets(){
       const src=RAW_BASE+encodeURIComponent(f.name)+'?t='+Date.now();
       return loadImg(src)
         .then(img=>{
-          sheets.push({name:f.name.replace(/\.[^.]+$/,''),img,src:img.src,fromGithub:true});
+          sheets.push({name:f.name.replace(/\.[^.]+$/,''),img,src:img.src,fromGithub:true,order:files.indexOf(f)});
           loaded++;
-          // 1枚読み込むたびに即表示
+          // order通りに並べ直してから表示
+          sheets.sort((a,b)=>(a.order||0)-(b.order||0));
           renderSheets();
         })
         .catch(()=>{});
@@ -297,10 +311,56 @@ document.getElementById('file-sheet').addEventListener('change',async e=>{
 function renderSheets(){
   const el=document.getElementById('sheets-list');el.innerHTML='';
   if(!sheets.length){el.innerHTML='<div style="text-align:center;color:var(--muted);font-size:11px;padding:8px 0;">「＋」で素材画像を読み込む</div>';return;}
+
+  let dragSrcIdx=null;
+
   sheets.forEach((s,i)=>{
-    const d=document.createElement('div');d.className='sheet-item'+(activeSheet===i?' active':'');
-    d.innerHTML=`<img class="sheet-thumb" src="${s.src}"/><span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">${s.name}</span>${s.fromGithub?'<span class="sheet-badge">GitHub</span>':''}`;
-    d.onclick=()=>openPicker(i);el.appendChild(d);
+    const d=document.createElement('div');
+    d.className='sheet-item'+(activeSheet===i?' active':'');
+    d.draggable=true;
+    d.dataset.idx=i;
+    d.innerHTML=`
+      <span style="color:var(--muted);font-size:14px;cursor:grab;margin-right:2px;">⠿</span>
+      <img class="sheet-thumb" src="${s.src}"/>
+      <span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">${s.name}</span>
+      ${s.fromGithub?'<span class="sheet-badge">GitHub</span>':''}
+    `;
+    // クリックで開く（ドラッグ中は無視）
+    d.onclick=(e)=>{if(!e._dragged)openPicker(i);};
+
+    // ドラッグ並べ替え
+    d.addEventListener('dragstart',e=>{
+      dragSrcIdx=i;
+      d.style.opacity='0.4';
+      e.dataTransfer.effectAllowed='move';
+    });
+    d.addEventListener('dragend',()=>{
+      d.style.opacity='';
+      el.querySelectorAll('.sheet-item').forEach(x=>x.style.background='');
+    });
+    d.addEventListener('dragover',e=>{
+      e.preventDefault();
+      e.dataTransfer.dropEffect='move';
+      d.style.background='rgba(124,92,252,.2)';
+    });
+    d.addEventListener('dragleave',()=>{d.style.background='';});
+    d.addEventListener('drop',e=>{
+      e.preventDefault();e._dragged=true;
+      d.style.background='';
+      if(dragSrcIdx===null||dragSrcIdx===i)return;
+      // 並べ替え
+      const moved=sheets.splice(dragSrcIdx,1)[0];
+      sheets.splice(i,0,moved);
+      if(activeSheet===dragSrcIdx)activeSheet=i;
+      else if(activeSheet!==null){
+        if(dragSrcIdx<activeSheet&&i>=activeSheet)activeSheet--;
+        else if(dragSrcIdx>activeSheet&&i<=activeSheet)activeSheet++;
+      }
+      dragSrcIdx=null;
+      renderSheets();
+    });
+
+    el.appendChild(d);
   });
 }
 
@@ -853,6 +913,7 @@ function cancelText(){
 // ===== LAYERS =====
 function renderLayers(){
   const el=document.getElementById('layer-list');
+  if(!el)return; // layer-listがない場合はスキップ
   if(!parts.length){el.innerHTML='<div style="color:var(--muted);font-size:11px;">パーツなし</div>';return;}
   el.innerHTML='';
   [...parts].reverse().forEach(p=>{
