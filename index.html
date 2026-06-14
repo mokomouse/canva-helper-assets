@@ -318,9 +318,11 @@ function commitShape(){
   const fill=document.getElementById('shape-fill').checked;
   if(sw<2&&sh<2)return;
 
+  // 非同期前にshapeModeを保存
+  const currentMode=shapeMode;
   const pad=lw+2;
   let tmp,tc;
-  if(shapeMode==='line'||shapeMode==='arrow'){
+  if(currentMode==='line'||currentMode==='arrow'){
     const W=Math.abs(shapeEnd.x-shapeStart.x)+pad*2;
     const H=Math.abs(shapeEnd.y-shapeStart.y)+pad*2;
     tmp=document.createElement('canvas');tmp.width=Math.max(W,1);tmp.height=Math.max(H,1);
@@ -331,10 +333,10 @@ function commitShape(){
     const y2=shapeStart.y<shapeEnd.y?H-pad:pad;
     tc.strokeStyle=color;tc.lineWidth=lw;tc.lineCap='round';
     tc.beginPath();tc.moveTo(x1,y1);tc.lineTo(x2,y2);tc.stroke();
-    // 矢印の場合は矢頭を追加
-    if(shapeMode==='arrow'){
+    if(currentMode==='arrow'){
       const angle=Math.atan2(y2-y1,x2-x1);
-      const headLen=Math.max(10,lw*4);
+      const headLen=Math.max(12,lw*5);
+      tc.lineWidth=lw;tc.lineCap='round';
       tc.beginPath();
       tc.moveTo(x2,y2);
       tc.lineTo(x2-headLen*Math.cos(angle-Math.PI/6),y2-headLen*Math.sin(angle-Math.PI/6));
@@ -342,12 +344,12 @@ function commitShape(){
       tc.lineTo(x2-headLen*Math.cos(angle+Math.PI/6),y2-headLen*Math.sin(angle+Math.PI/6));
       tc.stroke();
     }
-  } else if(shapeMode==='rect'){
+  } else if(currentMode==='rect'){
     tmp=document.createElement('canvas');tmp.width=sw+pad*2;tmp.height=sh+pad*2;
     tc=tmp.getContext('2d');
     if(fill){tc.fillStyle=color;tc.fillRect(pad,pad,sw,sh);}
     tc.strokeStyle=color;tc.lineWidth=lw;tc.strokeRect(pad,pad,sw,sh);
-  } else if(shapeMode==='circle'){
+  } else if(currentMode==='circle'){
     const r=Math.max(sw,sh)/2+pad;
     tmp=document.createElement('canvas');tmp.width=r*2;tmp.height=r*2;
     tc=tmp.getContext('2d');
@@ -356,21 +358,25 @@ function commitShape(){
     tc.strokeStyle=color;tc.lineWidth=lw;tc.stroke();
   }
 
+  if(!tmp)return;
   const src=tmp.toDataURL('image/png');
-  loadImg(src).then(img=>{
-    const cx=shapeMode==='circle'?(shapeStart.x+shapeEnd.x)/2-tmp.width/2:sx-pad;
-    const cy=shapeMode==='circle'?(shapeStart.y+shapeEnd.y)/2-tmp.height/2:sy-pad;
-    const part={id:nextId++,name:shapeMode,img,src,
+  const cx=currentMode==='circle'?(shapeStart.x+shapeEnd.x)/2-tmp.width/2:sx-pad;
+  const cy=currentMode==='circle'?(shapeStart.y+shapeEnd.y)/2-tmp.height/2:sy-pad;
+
+  // loadImgを使わず直接Imageを作成（CORS問題を回避）
+  const img=new Image();
+  img.onload=()=>{
+    const part={id:nextId++,name:currentMode,img,src,
       x:cx,y:cy,w:tmp.width,h:tmp.height,baseW:tmp.width,baseH:tmp.height,
       scale:100,opacity:100,rotate:0,flipH:false,isShape:true};
     parts.push(part);selected=part;
     render();renderLayers();updateColorPanel();
     toast('図形を追加しました','ok');
-    // 1回描いたらモードをオフ
     shapeMode=null;
     document.querySelectorAll('.shape-btn').forEach(b=>b.classList.remove('active'));
     mc.style.cursor='default';
-  });
+  };
+  img.src=src;
 }
 
 // ===== PICKER =====
@@ -421,7 +427,8 @@ function cropAndAdd(){
   crop.getContext('2d').drawImage(s.img,sx,sy,sw,sh,0,0,sw,sh);
   const src=removeWhiteBg(crop);
   selRect.style.display='none';closePicker();
-  loadImg(src).then(img=>{
+  const img=new Image();
+  img.onload=()=>{
     const maxW=Math.min(sw,mc.width*0.35),sc=maxW/sw,w=sw*sc,h=sh*sc;
     const part={id:nextId++,name:`パーツ${nextId-1}`,img,src,
       x:(mc.width-w)/2,y:(mc.height-h)/2,w,h,baseW:w,baseH:h,
@@ -429,7 +436,8 @@ function cropAndAdd(){
     parts.push(part);selected=part;
     render();renderLayers();updateColorPanel();
     addSavedPart(src,part.name);toast('パーツを追加しました！','ok');
-  });
+  };
+  img.src=src;
 }
 function addSavedPart(src,name){
   const el=document.getElementById('saved-parts');
